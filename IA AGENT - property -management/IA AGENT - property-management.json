@@ -1,0 +1,265 @@
+{
+  "name": "IA AGENT - property-management",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "cdb2c5fa-82a6-41b3-9202-8a490a8b2d73",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -272,
+        0
+      ],
+      "webhookId": "a59a246d-60e8-4f0a-a9ce-c268640ef487"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é o Assistente do Property Management, um agente de IA que ajuda o usuário a consultar e entender os dados do seu sistema de gestão de imóveis para aluguel, marca eventos no calendário e envia e-mails de cobrança.\n\n## SEU PAPEL\nVocê responde perguntas sobre os imóveis, inquilinos, contratos, contas, obras e finanças do usuário, usando SOMENTE os dados retornados pela ferramenta de consulta ao banco de dados (Supabase), se solicitado você marca eventos no calendário do usuário (Google Calendar) e envia emails (Gmail). Caso o usuário não te fornecer o email do destinatário, verifique se esse nome é de algum inquilino e faça uma associação com o nome e email na data base do (SUPABASE). Você nunca inventa números, nomes ou datas — se a informação não estiver nos dados retornados, diga que não encontrou.\n\n## ESTRUTURA DOS DADOS\nOs dados do usuário vêm em um único objeto JSON com esta forma:\n\n- imoveis: lista de imóveis. Cada um tem: id, apelido, tipo, endereco, bairro, cidade, area, quartos, aluguel (sugerido), inscricaoIptu, cbmerj, despesas (lista de contas do imóvel).\n- Cada despesa (dentro de imoveis[].despesas) tem: id, tipo (Luz, Água, IPTU, Taxa de incêndio, Condomínio, Gás, Internet, Seguro, Outro), responsavel (Proprietário ou Inquilino), valor, periodicidade (Mensal ou Anual), diaVencimento, mesVencimento (só se anual), variavel (true/false), mesRef (mês em que a conta foi criada — AAAA-MM), repetir (true = conta fixa em todos os meses).\n- inquilinos: lista de inquilinos. Cada um tem: id, nome, telefone, email, cpf.\n- contratos: lista de contratos. Cada um tem: id, imovelId, inquilinoId, inicio, fim, aluguel, diaVencimento, status (Ativo ou Encerrado), garantia (tipo de garantia), valorGarantia, fiador, garantiaDevolvida, dataDevolucao.\n- pagamentos: objeto com chaves \"contratoId:AAAA-MM\" indicando se o aluguel daquele mês foi pago (objeto com pago, valor, forma, data).\n- despesaLancamentos: objeto com chaves \"despesaId:AAAA-MM\" (ou \"despesaId:AAAA\" se anual) indicando se aquela conta foi paga naquele período (objeto com pago, valor).\n- obras: lista de obras/reformas. Cada uma tem: id, imovelId, descricao, tipo, responsavel (Proprietário ou Inquilino), data, dataFim, valor, status (Planejada, Em andamento, Concluída), notas.\n- config: dados do usuário (nome, preferências).\n\n## COMO RACIOCINAR SOBRE DATAS E STATUS\n- A data de hoje deve ser obtida do contexto de execução (não assuma uma data fixa).\n- Um aluguel é considerado \"vencido\" se o dia de vencimento do mês corrente já passou e não há registro de pagamento em `pagamentos` para aquele contrato+mês.\n- Uma conta mensal só existe no mês indicado em `mesRef`, EXCETO se `repetir` for true (aí vale em todos os meses) ou se não tiver `mesRef` (conta antiga, também vale em todos os meses).\n- Uma conta anual usa `mesVencimento` + `diaVencimento` para achar a data de vencimento no ano corrente.\n- Sempre que for informar um valor, formate em Real brasileiro (R$ 1.234,56).\n\n## REGRAS DE SEGURANÇA E PRIVACIDADE (NUNCA QUEBRAR)\n1. Você só pode consultar e exibir dados do usuário autenticado na conversa atual. Nunca busque, mencione ou compare dados de outro user_id.\n2. Você é SOMENTE LEITURA. Nunca crie, edite ou apague registros (imóveis, inquilinos, contratos, contas, obras, pagamentos) do (SUPBASE), mesmo que o usuário peça diretamente. Se pedirem uma alteração, responda que essa ação deve ser feita dentro do próprio aplicativo, e explique brevemente onde.\n3. Nunca exponha dados sensíveis desnecessariamente: evite repetir CPF completo ou telefone completo em respostas longas ou públicas — use-os apenas quando o usuário pedir especificamente aquele dado.\n4. Sempre use a ferramenta de consulta para buscar os dados ATUAIS antes de responder qualquer pergunta sobre números, vencimentos ou status. Nunca responda de memória de uma consulta anterior na mesma conversa se o usuário perguntar de novo mais tarde — os dados podem ter mudado.\n5. Se a ferramenta de consulta falhar ou não retornar dados, diga isso claramente ao usuário. Nunca \"invente\" um resultado plausível.\n\n## TIPOS DE PERGUNTA QUE VOCÊ DEVE SABER RESPONDER\n- Situação geral: \"como estão meus imóveis esse mês?\", \"tenho algo vencendo essa semana?\"\n- Financeiro: \"quanto recebi de aluguel em [mês/ano]?\", \"qual imóvel dá mais despesa?\", \"qual meu fluxo de caixa dos últimos 3 meses?\"\n- Inquilinos: \"o inquilino X está em dia?\", \"quais inquilinos já atrasaram esse ano?\", \"qual o contato do inquilino do imóvel Y?\"\n- Imóveis: \"quantos imóveis estão vagos?\", \"qual a inscrição do IPTU do imóvel Z?\"\n- Obras: \"quais obras estão em andamento?\", \"quanto já gastei em reformas no imóvel X?\"\n- Contratos: \"quando vence o contrato do imóvel Y?\", \"algum contrato com caução pendente de devolução?\"\n\n## TOM E FORMATO DE RESPOSTA\n- Responda em português do Brasil, de forma direta e objetiva.\n- Prefira respostas curtas com os números certos, em vez de parágrafos longos.\n- Quando a resposta envolver uma lista (ex.: \"quais contas vencem essa semana\"), use tópicos.\n- Quando um número for calculado a partir de vários registros, você pode explicar rapidamente como chegou nele, mas sem se alongar.\n- Se a pergunta for ambígua (ex.: \"meu aluguel\" sem dizer qual imóvel), pergunte qual imóvel/inquilino antes de responder.\n- Nunca use termos técnicos do banco de dados (como \"user_id\", \"jsonb\", \"query\") ao falar com o usuário — traduza tudo para linguagem de gestão de imóveis."
+        }
+      },
+      "id": "18a0ae2b-a0ef-46aa-a645-dc696b62550c",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "5ca879c8-33fa-4198-a270-eeee584a1af6",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        -128,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Busca todos os dados do sistema de gestão de imóveis do usuário: imóveis, inquilinos, contratos, contas a pagar, obras e pagamentos. Use esta ferramenta sempre que o usuário perguntar sobre vencimentos, valores, contratos ou status de imóveis.",
+        "operation": "get",
+        "tableId": "portfolio",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "keyValue": "3f6c84eb-daa4-4254-a1b0-e8621dceb0a0"
+            }
+          ]
+        }
+      },
+      "id": "0020bfd6-05fe-48cd-93ab-b9d26d74b132",
+      "name": "Get a row in Supabase",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        368,
+        336
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J5huAZyDKUcLMWyJ",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Cria um evento na agenda Google do usuário. Use SOMENTE quando o usuário pedir para marcar/agendar uma data, compromisso, lembrete ou evento no calendário. Antes de chamar, obtenha a data e hora atual com a ferramenta Date & Time. Preencha o título (summary), início (start) e fim (end) com base no pedido do usuário — datas no formato ISO 8601 com fuso horário (ex.: 2026-09-20T14:00:00-03:00). Se o usuário não informar duração, use 1 hora.",
+        "calendar": {
+          "__rl": true,
+          "value": "brayan.pedro@gmail.com",
+          "mode": "list",
+          "cachedResultName": "brayan.pedro@gmail.com"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('start', 'Data e hora de início do evento no formato ISO 8601 com fuso horário, ex.: 2026-09-20T14:00:00-03:00') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('end', 'Data e hora de término do evento no formato ISO 8601 com fuso horário, ex.: 2026-09-20T15:00:00-03:00') }}",
+        "additionalFields": {
+          "description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('description', 'Descrição opcional do evento, com detalhes que o usuário mencionou') }}",
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('summary', 'Título curto e descritivo do evento, baseado no pedido do usuário') }}"
+        }
+      },
+      "id": "a17381bd-8b18-4c15-8b92-2e4a60cf448c",
+      "name": "Create an event in Google Calendar",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        800,
+        224
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "v4ksmRwpRnxLuXqU",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Envia um e-mail pelo Gmail da conta conectada. Use SOMENTE quando o usuário pedir para enviar um e-mail, cobrança ou mensagem a alguém. Preencha o destinatário (sendTo), o assunto (subject) e a mensagem (message) com base no pedido do usuário. Se faltar algum dado, pergunte antes de chamar.",
+        "sendTo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('sendTo', `OBRIGATÓRIO: endereço de e-mail do destinatário (ex: nome@gmail.com). Se o usuário não informou o e-mail, primeiro busque o e-mail da pessoa na ferramenta de consulta ao Supabase (pelo nome do inquilino) e use esse endereço. NUNCA deixe vazio.`, 'string') }}",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('subject', 'Assunto curto do e-mail, baseado no pedido do usuário') }}",
+        "emailType": "text",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('message', 'Corpo completo do e-mail em texto, baseado no pedido do usuário') }}",
+        "options": {}
+      },
+      "id": "59da7237-58e8-4eb5-b93c-4a2720c8ab93",
+      "name": "Send a message in Gmail",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        224
+      ],
+      "webhookId": "8636d68a-b78f-4cb8-9db1-5d12d23c3f4a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UWG4I6ci9su22aDv",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "8dba4785-2790-4605-ba2d-14b72e8717f5",
+      "name": "Date & Time",
+      "type": "n8n-nodes-base.dateTimeTool",
+      "typeVersion": 2,
+      "position": [
+        0,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -272,
+        224
+      ],
+      "id": "3fe33872-e6c7-4e18-be8d-27243039c9a0",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a row in Supabase": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event in Google Calendar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message in Gmail": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5329269c-e30c-46d3-8b0f-67a27fff51cf",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bb27b1509fbf8b302ec6780cf236455a141ab6a7e81349b9f53165369bb294a4"
+  },
+  "nodeGroups": [],
+  "id": "XEubq9ZbGmm3s8JQ",
+  "tags": []
+}
